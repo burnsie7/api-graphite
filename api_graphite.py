@@ -27,6 +27,7 @@ log.addHandler(out_hdlr)
 log.setLevel(logging.INFO)
 
 METRIC_STORE = {}
+METRIC_COUNT = 0
 
 DD_API_KEY = os.getenv('DD_API_KEY', '<YOUR_API_KEY>')
 DD_APP_KEY = os.getenv('DD_APP_KEY', '<YOUR_APP_KEY>')
@@ -42,7 +43,10 @@ def get_and_clear_store():
     global METRIC_STORE
     temp_store = copy.deepcopy(METRIC_STORE)
     METRIC_STORE = {}
-    return temp_store
+    global METRIC_COUNT
+    count = copy.deepcopy(METRIC_COUNT)
+    METRIC_COUNT = 0
+    return temp_store, count
 
 class GraphiteServer(TCPServer):
 
@@ -51,30 +55,29 @@ class GraphiteServer(TCPServer):
         self._sendMetrics()
 
     def _sendMetrics(self):
-        temp_store = get_and_clear_store()
+        temp_store, count = get_and_clear_store()
         all_metrics = []
         start_time = time.time()
         for metric, val in temp_store.iteritems():
-            if metric.startswith('zuora.webapp'):
-                try:
-                    tags = []
-                    components = metric.split('.')
+            try:
+                tags = []
+                components = metric.split('.')
 
-                    datacenter = 'datacenter:' + components.pop(2)
-                    env = 'env:' + components.pop(2)
-                    instance = 'instance:' + components.pop(2)
-                    sub_instance = 'subinstance:' + instance.split('_')[1]
-                    tenant_id = 'tenant_id:' + components.pop(3)
-                    tags = [datacenter, env, instance, sub_instance, tenant_id]
+                datacenter = 'datacenter:' + components.pop(2)
+                env = 'env:' + components.pop(2)
+                instance = 'instance:' + components.pop(2)
+                sub_instance = 'subinstance:' + instance.split('_')[1]
+                tenant_id = 'tenant_id:' + components.pop(3)
+                tags = [datacenter, env, instance, sub_instance, tenant_id]
 
-                    metric = '.'.join(components)
-                    all_metrics.append({'metric': metric, 'points': val, 'tags': tags})
-                except Exception as e:
-                    log.error(e)
+                metric = '.'.join(components)
+                all_metrics.append({'metric': metric, 'points': val, 'tags': tags})
+            except Exception as e:
+                log.error(e)
         if len(all_metrics):
             log.debug(str(temp_store))
             api.Metric.send(all_metrics)
-            log.info("sent {} metrics in {} seconds\n".format(str(len(all_metrics)), str(time.time() - start_time)))
+            log.info("sent {} metrics with {} unique namesin {} seconds\n".format(str(len(all_metrics)), str(count), str(time.time() - start_time)))
         else:
             log.info("no metrics received")
         threading.Timer(10, self._sendMetrics).start()
@@ -108,7 +111,9 @@ class GraphiteConnection(object):
         log.info('client quit')
 
     def _processMetric(self, metric, datapoint):
-        if metric is not None:
+        if metric is not None and metric.startswith('zuora.webapp'):
+            global METRIC_COUNT
+            METRIC_COUNT += 1
             try:
                 val = datapoint[1]
                 if metric in METRIC_STORE:

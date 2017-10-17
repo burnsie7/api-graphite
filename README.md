@@ -13,6 +13,15 @@ sudo pip install datadog
 sudo pip install tornado
 ```
 
+Navigate to the repo directory and edit api_graphite.py, updating the DD_API_KEY and DD_APP_KEY with your keys.
+
+#### To run from the cli for testing purposes:
+
+`python api_graphite 17310`
+
+
+#### To install as a service:
+
 Edit /etc/supervisor/conf.d/supervisor.conf.  Add the following, updating 'numprocs'.
 ```
 [program:graphite-sink]
