@@ -77,7 +77,7 @@ class GraphiteServer(TCPServer):
         if len(all_metrics):
             log.debug(str(temp_store))
             api.Metric.send(all_metrics)
-            log.info("sent {} metrics with {} unique namesin {} seconds\n".format(str(len(all_metrics)), str(count), str(time.time() - start_time)))
+            log.info("sent {} metrics with {} unique names in {} seconds\n".format(str(count), str(len(all_metrics)), str(time.time() - start_time)))
         else:
             log.info("no metrics received")
         threading.Timer(10, self._sendMetrics).start()
