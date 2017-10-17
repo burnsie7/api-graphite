@@ -45,19 +45,21 @@ restart all
 
 Point your carbon relay at the graphite sinks specified in step 2.  Note that the number of sinks on an individual host is configured by 'numprocs' in /etc/supervisor/conf.d/supervisor.conf.  The port of the first sink will be 17310 and the port will increment for additional procs.  For example, if numprocs were set to 4:
 
-sink-hostname:17310
-sink-hostname:17311
-sink-hostname:17312
-sink-hostname:17313
+sink-hostname:17310  
+sink-hostname:17311  
+sink-hostname:17312  
+sink-hostname:17313  
 
 There are different options for distributing carbon relay, whether set with destinations directly in the carbon config or using haproxy.  Distribute the requests across the different sinks you have configured.
 
 If using relay rules it is advantageous to send only the metrics you wish to see in datadog to the sinks.  For example:
 
+```
 [datadog]
-pattern = ^zxyzxy\.webapp.+
+pattern = ^zuora\.webapp.+
 destinations = haproxy:port
 
 [default]
 default = true
 destinations = 127.0.0.1:2004
+```
