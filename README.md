@@ -5,7 +5,7 @@
 
 ```
 git clone https://github.com/burnsie7/api-graphite.git
-cd graphite-example
+cd api-grapite
 sudo apt-get update
 sudo apt-get install supervisor
 sudo apt-get install python-pip
@@ -16,7 +16,7 @@ sudo pip install tornado
 Edit /etc/supervisor/conf.d/supervisor.conf.  Add the following, updating 'numprocs'.
 ```
 [program:graphite-sink]
-command=python /exact/path/to/graphite-example/graphite.py 1731%(process_num)01d
+command=python /exact/path/to/api-grapite/graphite.py 1731%(process_num)01d
 process_name=%(program_name)s_%(process_num)01d
 redirect_stdout=true
 user=ubuntu
