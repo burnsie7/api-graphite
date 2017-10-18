@@ -60,7 +60,7 @@ def run(sock, delay):
         size = struct.pack('!L', len(package))
         sock.sendall(size)
         sock.sendall(package)
-        if count % 10000 == 0:
+        if count % 100000 == 0:
             # create a new connection every so often
             sock.close()
             sock = socket.socket()

@@ -41,12 +41,12 @@ initialize(**options)
 
 def get_and_clear_store():
     global METRIC_STORE
-    temp_store = copy.deepcopy(METRIC_STORE)
+    temp_store = METRIC_STORE.copy()
     METRIC_STORE = {}
     global METRIC_COUNT
-    count = copy.deepcopy(METRIC_COUNT)
+    count = [METRIC_COUNT]
     METRIC_COUNT = 0
-    return temp_store, count
+    return temp_store, count[0]
 
 class GraphiteServer(TCPServer):
 
