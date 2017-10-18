@@ -24,21 +24,6 @@ CARBON_SERVER = '127.0.0.1'
 CARBON_PICKLE_PORT = 17310
 DELAY = 1
 
-def get_loadavg():
-    """
-    Get the load average for a unix-like system.
-    For more details, "man proc" and "man uptime"
-    """
-    if platform.system() == "Linux":
-        return open('/proc/loadavg').read().split()[:3]
-    else:
-        command = "uptime"
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
-        stdout = process.communicate()[0].strip()
-        # Split on whitespace and commas
-        output = re.split("[\s,]+", stdout)
-        return output[-3:]
-
 def _genMetrics():
     # generate some random metrics names
     d_list = ['abc', 'def', 'ghi', 'jkl', 'mno', 'pqr', 'stu', 'vwx']
@@ -76,8 +61,13 @@ def run(sock, delay):
         sock.sendall(size)
         sock.sendall(package)
         if count % 10000 == 0:
-            print("sleep 1")
-            time.sleep(1)
+            # create a new connection every so often
+            sock.close()
+            sock = socket.socket()
+            try:
+                sock.connect( (CARBON_SERVER, CARBON_PICKLE_PORT) )
+            except socket.error:
+                raise SystemExit("Couldn't connect to %(server)s on port %(port)d, is carbon-cache.py running?" % { 'server':CARBON_SERVER, 'port':CARBON_PICKLE_PORT })
 
 def main():
     """Wrap it all up together"""
