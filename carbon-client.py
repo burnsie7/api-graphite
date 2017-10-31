@@ -26,9 +26,9 @@ DELAY = 1
 
 def _genMetrics():
     # generate some random metrics names
-    d_list = ['abc', 'def', 'ghi', 'jkl', 'mno', 'pqr', 'stu', 'vwx']
-    t_list = ['123', '456', '789', '101', '112', '131', '415']
-    i_list = ['dsaf_asdf_asdf', 'qewr_qwer_qwer', 'cvxb_xcvb_xcbxv', 'hgjk_fghj_dfghj', 'asdfdgfh_sdfg_sdfg']
+    d_list = ['abc'] # , 'def']
+    t_list = [str(i) for i in range(1000, 4000)]
+    i_list = ['hostname_' + str(i) for i in range(100)]
     d_len = len(d_list)
     t_len = len(t_list)
     i_len = len(i_list)
@@ -37,7 +37,7 @@ def _genMetrics():
         t = t_list[random.randint(0, t_len-1)]
         d = d_list[random.randint(0, d_len-1)]
         n = i_list[random.randint(0, i_len-1)]
-        met = "zuora.webapp." + d + ".prod." + n + ".storage." + t + ".save.hippo"
+        met = "zuora.webapp." + d + ".prod." + n + ".storage." + t + ".save.carbon"
         met_list.append(met)
     return met_list
 
@@ -55,13 +55,14 @@ def run(sock, delay):
         met = met_list[random.randint(0, m_len-1)]
         tuples.append((met, (now, loadavg)))
         lines.append("%s %s %d" % (met, loadavg, now))
-        message = '\n'.join(lines) + '\n' #all lines must end in a newline
+        message = '\n'.join(lines) + '\n'
         package = pickle.dumps(tuples, 1)
         size = struct.pack('!L', len(package))
         sock.sendall(size)
         sock.sendall(package)
-        if count % 100000 == 0:
-            # create a new connection every so often
+        if count % 30000 == 0:
+            # create a new connection to allow load balancing
+            time.sleep(1)
             sock.close()
             sock = socket.socket()
             try:
@@ -70,7 +71,6 @@ def run(sock, delay):
                 raise SystemExit("Couldn't connect to %(server)s on port %(port)d, is carbon-cache.py running?" % { 'server':CARBON_SERVER, 'port':CARBON_PICKLE_PORT })
 
 def main():
-    """Wrap it all up together"""
     delay = DELAY
     if len(sys.argv) > 1:
         arg = sys.argv[1]

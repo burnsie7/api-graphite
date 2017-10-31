@@ -5,19 +5,18 @@
 # stdlib
 from argparse import ArgumentParser
 import cPickle as pickle
-import copy
 import logging
-import os
 import threading
 import time
 import struct
 import sys
 
+import json
+import redis
+
 from tornado.ioloop import IOLoop
 from tornado.tcpserver import TCPServer
 from tornado import netutil, process
-
-from datadog import api, initialize
 
 log = logging.getLogger(__name__)
 out_hdlr = logging.StreamHandler(sys.stdout)
@@ -26,18 +25,12 @@ out_hdlr.setLevel(logging.INFO)
 log.addHandler(out_hdlr)
 log.setLevel(logging.INFO)
 
+REDIS_HOST = 'localhost'
+REDIS_PORT = 6379
+
 METRIC_STORE = {}
 METRIC_COUNT = 0
 
-DD_API_KEY = os.getenv('DD_API_KEY', '<YOUR_API_KEY>')
-DD_APP_KEY = os.getenv('DD_APP_KEY', '<YOUR_APP_KEY>')
-
-options = {
-    'api_key': DD_API_KEY,
-    'app_key': DD_APP_KEY
-}
-
-initialize(**options)
 
 def get_and_clear_store():
     global METRIC_STORE
@@ -50,37 +43,19 @@ def get_and_clear_store():
 
 class GraphiteServer(TCPServer):
 
-    def __init__(self, io_loop=None, ssl_options=None, **kwargs):
+    def __init__(self, io_loop=None, ssl_options=None, uid=None, **kwargs):
         TCPServer.__init__(self, io_loop=io_loop, ssl_options=ssl_options, **kwargs)
-        self._sendMetrics()
+        self.uid = uid
+        self._queueMetrics()
 
-    def _sendMetrics(self):
+    def _queueMetrics(self):
         temp_store, count = get_and_clear_store()
-        all_metrics = []
         start_time = time.time()
-        for metric, val in temp_store.iteritems():
-            try:
-                tags = []
-                components = metric.split('.')
-
-                datacenter = 'datacenter:' + components.pop(2)
-                env = 'env:' + components.pop(2)
-                instance = 'instance:' + components.pop(2)
-                sub_instance = 'subinstance:' + instance.split('_')[1]
-                tenant_id = 'tenant_id:' + components.pop(3)
-                tags = [datacenter, env, instance, sub_instance, tenant_id]
-
-                metric = '.'.join(components)
-                all_metrics.append({'metric': metric, 'points': val, 'tags': tags})
-            except Exception as e:
-                log.error(e)
-        if len(all_metrics):
-            log.debug(str(temp_store))
-            api.Metric.send(all_metrics)
-            log.info("sent {} metrics with {} unique names in {} seconds\n".format(str(count), str(len(all_metrics)), str(time.time() - start_time)))
-        else:
-            log.info("no metrics received")
-        threading.Timer(10, self._sendMetrics).start()
+        log.debug(str(temp_store))
+        conn = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
+        conn.set("metrics_" + str(self.uid) + "_" + str(start_time), json.dumps(temp_store))
+        log.info("sent {} metrics with {} unique names in {} seconds\n".format(str(count), str(len(temp_store)), str(time.time() - start_time)))
+        threading.Timer(10, self._queueMetrics).start()
 
     def handle_stream(self, stream, address):
         GraphiteConnection(stream, address)
@@ -114,6 +89,9 @@ class GraphiteConnection(object):
         if metric is not None and metric.startswith('zuora.webapp'):
             global METRIC_COUNT
             METRIC_COUNT += 1
+            components = metric.split('.')
+            components.pop(4)
+            metric = '.'.join(components)
             try:
                 val = datapoint[1]
                 if metric in METRIC_STORE:
@@ -147,7 +125,7 @@ class GraphiteConnection(object):
 
 def start_graphite_listener(port):
 
-    echo_server = GraphiteServer()
+    echo_server = GraphiteServer(uid=port)
     echo_server.listen(port)
     IOLoop.instance().start()
 
