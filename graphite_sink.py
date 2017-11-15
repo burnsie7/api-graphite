@@ -54,6 +54,21 @@ def get_and_clear_store():
     return temp_store, count[0]
 
 
+def _convert_graphite_to_tags(metric):
+    tags = []
+    components = metric.split('.')
+
+    # Customize to meet the format of you metric
+    datacenter = 'datacenter:' + components.pop(2)
+    env = 'env:' + components.pop(2)
+    instance = 'instance:' + components.pop(2)
+    tenant_id = 'tenant_id:' + components.pop(3)
+    tags = [datacenter, env, instance, tenant_id]
+
+    metric = '.'.join(components)
+    return metric, tags
+
+
 class GraphiteServer(TCPServer):
 
     def __init__(self, io_loop=None, ssl_options=None, **kwargs):
@@ -66,17 +81,7 @@ class GraphiteServer(TCPServer):
         start_time = time.time()
         for metric, val in temp_store.iteritems():
             try:
-                tags = []
-                components = metric.split('.')
-
-                # Customize to meet the format of you metric
-                datacenter = 'datacenter:' + components.pop(2)
-                env = 'env:' + components.pop(2)
-                instance = 'instance:' + components.pop(2)
-                tenant_id = 'tenant_id:' + components.pop(3)
-                tags = [datacenter, env, instance, tenant_id]
-
-                metric = '.'.join(components)
+                metric, tags = _convert_graphite_to_tags(metric)
                 all_metrics.append({'metric': metric, 'points': val, 'tags': tags})
             except Exception as ex:
                 LOGGER.error(ex)
