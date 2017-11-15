@@ -1,11 +1,16 @@
-# Running asynchronous workers to process graphite metrics
-### This is meant as a proof of concept only. Not to be used in production.
+### Threaded graphite sink for converting and forwarding graphite/carbon metrics to Datadog.  This configures a single endpoint and is suitable for collecting < 1000 metrics / sec.  For collecting > 1000 metrics / sec see the multi-worker sink here: https://github.com/burnsie7/graphite-collector
+
+### Step 0 - Datadog Agent
+
+This assumes the Datadog Agent, including the dogstatsd service is running on your host.  The metric collector sends metrics to Datadog using dogstatsd.
+
+For information on installing the client see here:  https://docs.datadoghq.com/guides/basic_agent_usage/
 
 ### Step 1 - Graphite sink(s)
 
 ```
-git clone https://github.com/burnsie7/api-graphite.git
-cd api-grapite
+git clone https://github.com/burnsie7/graphite-sink.git
+cd graphite-sink
 sudo apt-get update
 sudo apt-get install supervisor
 sudo apt-get install python-pip
@@ -13,24 +18,25 @@ sudo pip install datadog
 sudo pip install tornado
 ```
 
-Navigate to the repo directory and edit api_graphite.py, updating the DD_API_KEY and DD_APP_KEY with your keys.
+Navigate to the repo directory and edit graphite_sink.py, updating 'myapp.prefix' with the metric prefix you are sending to datadog.
 
 #### To run from the cli for testing purposes:
 
-`python api_graphite 17310`
+`python graphite_sink.py 17310`
 
+carbon_client.py is included to generate metrics with unique tags and send high throughput to the graphite_sink(s).  
 
 #### To install as a service:
 
 Edit /etc/supervisor/conf.d/supervisor.conf.  Add the following, updating 'numprocs'.
 ```
-[program:graphite-sink]
-command=python /exact/path/to/api-grapite/graphite.py 1731%(process_num)01d
+[program:graphite_sink]
+command=python /exact/path/to/graphite-sink/graphite_sink.py 1731%(process_num)01d
 process_name=%(program_name)s_%(process_num)01d
 redirect_stdout=true
 user=ubuntu
-stdout_logfile=/var/log/gsink-%(process_num)01d.log
-numprocs=<NUMBER OF PROCS ALLOCATED>
+stdout_logfile=/var/log/graphite_sink-%(process_num)01d.log
+numprocs=1
 ```
 
 Update supervisor and restart all services.
@@ -43,20 +49,17 @@ restart all
 
 ### Step 2 - Your carbon-relay
 
-Point your carbon relay at the graphite sinks specified in step 2.  Note that the number of sinks on an individual host is configured by 'numprocs' in /etc/supervisor/conf.d/supervisor.conf.  The port of the first sink will be 17310 and the port will increment for additional procs.  For example, if numprocs were set to 4:
+Point your carbon relay at the graphite sink specified in step 2.
 
 sink-hostname:17310  
-sink-hostname:17311  
-sink-hostname:17312  
-sink-hostname:17313  
 
-There are different options for distributing carbon relay, whether set with destinations directly in the carbon config or using haproxy.  Distribute the requests across the different sinks you have configured.
+There are different options for distributing carbon relay, whether set with destinations directly in the carbon config or using haproxy.
 
 If using relay rules it is advantageous to send only the metrics you wish to see in datadog to the sinks.  For example:
 
 ```
 [datadog]
-pattern = ^zuora\.webapp.+
+pattern = ^myapp\.prefix.+
 destinations = haproxy:port
 
 [default]
