@@ -5,9 +5,7 @@
 # stdlib
 from argparse import ArgumentParser
 import cPickle as pickle
-import copy
 import logging
-import os
 import threading
 import time
 import struct
@@ -17,27 +15,34 @@ from tornado.ioloop import IOLoop
 from tornado.tcpserver import TCPServer
 from tornado import netutil, process
 
-from datadog import api, initialize
+from datadog import api, initialize, statsd
 
-log = logging.getLogger(__name__)
-out_hdlr = logging.StreamHandler(sys.stdout)
-out_hdlr.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
-out_hdlr.setLevel(logging.INFO)
-log.addHandler(out_hdlr)
-log.setLevel(logging.INFO)
+LOGGER = logging.getLogger(__name__)
+OUT_HDLR = logging.StreamHandler(sys.stdout)
+OUT_HDLR.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+OUT_HDLR.setLevel(logging.INFO)
+LOGGER.addHandler(OUT_HDLR)
+LOGGER.setLevel(logging.INFO)
 
 METRIC_STORE = {}
 METRIC_COUNT = 0
+DELAY = 15  # Interval at which to aggregate and forward metrics
+SEND_VIA_API = False
 
-DD_API_KEY = os.getenv('DD_API_KEY', '<YOUR_API_KEY>')
-DD_APP_KEY = os.getenv('DD_APP_KEY', '<YOUR_APP_KEY>')
+# Uncomment below to send via API.
+# Best if you have < 100 unique metrics / tag combinations and don't want to install the agent
 
-options = {
-    'api_key': DD_API_KEY,
-    'app_key': DD_APP_KEY
-}
-
-initialize(**options)
+#from datadog import api, initialize
+#SEND_VIA_API = True
+#DD_API_KEY = os.getenv('DD_API_KEY', '<YOUR_API_KEY>')
+#DD_APP_KEY = os.getenv('DD_APP_KEY', '<YOUR_APP_KEY>')
+#
+#options = {
+#    'api_key': DD_API_KEY,
+#    'app_key': DD_APP_KEY
+#}
+#
+#initialize(**options)
 
 def get_and_clear_store():
     global METRIC_STORE
@@ -48,13 +53,14 @@ def get_and_clear_store():
     METRIC_COUNT = 0
     return temp_store, count[0]
 
+
 class GraphiteServer(TCPServer):
 
     def __init__(self, io_loop=None, ssl_options=None, **kwargs):
         TCPServer.__init__(self, io_loop=io_loop, ssl_options=ssl_options, **kwargs)
-        self._sendMetrics()
+        self._send_metrics()
 
-    def _sendMetrics(self):
+    def _send_metrics(self):
         temp_store, count = get_and_clear_store()
         all_metrics = []
         start_time = time.time()
@@ -63,24 +69,28 @@ class GraphiteServer(TCPServer):
                 tags = []
                 components = metric.split('.')
 
+                # Customize to meet the format of you metric
                 datacenter = 'datacenter:' + components.pop(2)
                 env = 'env:' + components.pop(2)
                 instance = 'instance:' + components.pop(2)
-                sub_instance = 'subinstance:' + instance.split('_')[1]
                 tenant_id = 'tenant_id:' + components.pop(3)
-                tags = [datacenter, env, instance, sub_instance, tenant_id]
+                tags = [datacenter, env, instance, tenant_id]
 
                 metric = '.'.join(components)
                 all_metrics.append({'metric': metric, 'points': val, 'tags': tags})
-            except Exception as e:
-                log.error(e)
-        if len(all_metrics):
-            log.debug(str(temp_store))
-            api.Metric.send(all_metrics)
-            log.info("sent {} metrics with {} unique names in {} seconds\n".format(str(count), str(len(all_metrics)), str(time.time() - start_time)))
+            except Exception as ex:
+                LOGGER.error(ex)
+        if all_metrics:
+            if SEND_VIA_API:
+                api.Metric.send(all_metrics)
+            else:
+                for metric in all_metrics:
+                    statsd.gauge(metric['metric'], metric['points'], tags=metric['tags'])
+            LOGGER.info("sent %r metrics with %r unique names in %r seconds\n",
+                        count, len(temp_store), time.time() - start_time)
         else:
-            log.info("no metrics received")
-        threading.Timer(10, self._sendMetrics).start()
+            LOGGER.info("no metrics received")
+        threading.Timer(DELAY, self._send_metrics).start()
 
     def handle_stream(self, stream, address):
         GraphiteConnection(stream, address)
@@ -89,7 +99,7 @@ class GraphiteServer(TCPServer):
 class GraphiteConnection(object):
 
     def __init__(self, stream, address):
-        log.info('received a new connection from {}'.format(address))
+        LOGGER.info("received a new connection from %r", address)
         self.stream = stream
         self.address = address
         self.stream.set_close_callback(self._on_close)
@@ -98,20 +108,21 @@ class GraphiteConnection(object):
     def _on_read_header(self, data):
         try:
             size = struct.unpack("!L", data)[0]
-            log.debug("Receiving a string of size: {}".format(str(size)))
+            LOGGER.debug("Receiving a string of size: %r", size)
             self.stream.read_bytes(size, self._on_read_line)
-        except Exception as e:
-            log.error(e)
+        except Exception as ex:
+            LOGGER.error(ex)
 
     def _on_read_line(self, data):
-        log.debug('read a new line')
+        LOGGER.debug('read a new line')
         self._decode(data)
 
     def _on_close(self):
-        log.info('client quit')
+        LOGGER.info('client quit')
 
-    def _processMetric(self, metric, datapoint):
-        if metric is not None and metric.startswith('zuora.webapp'):
+    def _process_metric(self, metric, datapoint):
+        # Update 'myapp.prefix' with the metric prefix you would like to send to Datadog.
+        if metric is not None and metric.startswith('myapp.prefix'):
             global METRIC_COUNT
             METRIC_COUNT += 1
             try:
@@ -122,25 +133,25 @@ class GraphiteConnection(object):
                     METRIC_STORE[metric] = new_val
                 else:
                     METRIC_STORE[metric] = val
-            except Exception as e:
-                log.error(e)
+            except Exception as ex:
+                LOGGER.error(ex)
 
     def _decode(self, data):
 
         try:
             datapoints = pickle.loads(data)
         except Exception:
-            log.exception("Cannot decode grapite points")
+            LOGGER.exception("Cannot decode grapite points")
             return
 
         for (metric, datapoint) in datapoints:
             try:
                 datapoint = (float(datapoint[0]), float(datapoint[1]))
-            except Exception as e:
-                log.error(e)
+            except Exception as ex:
+                LOGGER.error(ex)
                 continue
 
-            self._processMetric(metric, datapoint)
+            self._process_metric(metric, datapoint)
 
         self.stream.read_bytes(4, self._on_read_header)
 
